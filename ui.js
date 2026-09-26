@@ -14,7 +14,28 @@ export function toast(msg, ms = 2600) {
   clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), ms);
 }
 
-export function go(hash) { if (location.hash === hash) window.dispatchEvent(new HashChangeEvent("hashchange")); else location.hash = hash; }
+// Навигация: табовете и листането не трупат история; „назад“ връща само от вътрешни екрани.
+let renderFn = () => {};
+let pendingTab = null;
+const depth = () => (history.state && history.state.depth) || 0;
+export function setRenderer(fn) { renderFn = fn; }
+export function navigate(href, mode = "push") {
+  if (mode === "tab" && depth() > 0) { pendingTab = href; history.go(-depth()); return; }
+  if (mode === "push") history.pushState({ depth: depth() + 1 }, "", href);
+  else history.replaceState(history.state, "", href);
+  renderFn();
+}
+// Извиква се при „назад“/„напред“; довършва смяна на таб след връщане до основния екран.
+export function onHistoryChange() {
+  if (pendingTab) { const h = pendingTab; pendingTab = null; history.replaceState(history.state, "", h); }
+  renderFn();
+}
+export function goBack(fallback) {
+  if (depth() > 0) history.back();
+  else navigate(fallback, "replace");
+}
+// След запис/изтриване: заменяме текущия екран, за да не се връщаме към формата.
+export function go(hash) { navigate(hash, "replace"); }
 
 export function openPhoto(blob) {
   const d = document.getElementById("lightbox");

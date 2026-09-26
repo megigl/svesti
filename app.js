@@ -2,7 +2,7 @@ import { db, requestPersistence, storageInfo, mergeRecords, getSettings, saveSet
 import { makeThumb, blobToDataURL, dataURLToBlob } from "./image.js";
 import { CONFIG } from "./config.js";
 import { fmt, num } from "./calc.js";
-import { $, $$, esc, view, toast, go, releaseURLs, download, applySeason, SEASONS, seasonFor } from "./ui.js";
+import { $, $$, esc, view, toast, go, releaseURLs, download, applySeason, SEASONS, seasonFor, setRenderer, navigate, goBack, onHistoryChange } from "./ui.js";
 import * as sync from "./sync.js";
 import { renderList, renderDetail, renderEdit, liveCandles, CSV_COLUMNS } from "./recipes.js";
 import { renderCalc } from "./calc-ui.js";
@@ -10,7 +10,23 @@ import { renderMonth, renderWeek, renderPost, renderPostEdit, renderTaskEdit, bi
 import { purgePublishedPhotos } from "./calendar.js";
 
 // ---------- Навигация ----------
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", onHistoryChange);
+setRenderer(render);
+const TAB_LINKS = ".tabs a";
+const REPLACE_LINKS = ".seg a, .month-nav a, .week-nav a";
+const BACK_LINKS = ".round-back, .text-link";
+document.addEventListener("click", e => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const href = a.getAttribute("href");
+  if (href === "#" || a.hasAttribute("download")) return;
+  e.preventDefault();
+  if (href === location.hash) return;
+  if (a.matches(BACK_LINKS)) goBack(href);
+  else if (a.matches(TAB_LINKS)) navigate(href, "tab");
+  else if (a.matches(REPLACE_LINKS)) navigate(href, "replace");
+  else navigate(href, "push");
+});
 async function render() {
   releaseURLs();
   const parts = location.hash.replace(/^#\/?/, "").split("/");
@@ -101,7 +117,7 @@ async function renderSettings() {
     <section class="set">
       <h2>Памет на телефона</h2>
       <p>${count} рецепти, ${photos.length} снимки. Заето: ${fmt(info.usage / 1048576, 1)} MB.</p>
-      <p class="muted">${info.persisted ? "Данните са защитени от автоматично изтриване." : "Браузърът може да изтрие данните при недостиг на памет."}</p>
+      <p class="muted">${info.persisted ? "Данните са защитени от автоматично изтриване." : "Chrome още не е разрешил пълна защита. Обикновено го прави сам след няколко дни редовно ползване. Дотогава пазете копие в OneDrive или чрез „Експорт на архив“."}</p>
       ${info.persisted ? "" : `<button class="btn outline" id="persist">Защити данните</button>`}
     </section>`;
   const on = (id, fn) => { const el = $("#" + id); if (el) el.addEventListener("click", fn); };
@@ -109,7 +125,7 @@ async function renderSettings() {
   on("reLogin", () => sync.syncNow({ interactive: true }));
   on("logout", () => { if (confirm("Изход от Microsoft акаунта? Данните остават на телефона.")) sync.signOut(); });
   on("syncBtn", () => sync.syncNow());
-  on("persist", async () => { toast((await requestPersistence()) ? "Данните са защитени" : "Браузърът отказа. Инсталирайте приложението на началния екран и опитайте пак."); renderSettings(); });
+  on("persist", async () => { toast((await requestPersistence()) ? "Данните са защитени" : "Chrome още не разрешава. Приложението ще опитва само при всяко отваряне.", 4000); renderSettings(); });
   on("expJson", exportJson);
   on("expCsv", exportCsv);
   $("#impJson").addEventListener("change", importArchive);
