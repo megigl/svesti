@@ -4,7 +4,7 @@
 // ============================================================
 export const CONFIG = {
   // Поставете вашия Application (client) ID между кавичките:
-  clientId: "ПОСТАВЕТЕ-ТУК-CLIENT-ID",
+  clientId: "5578dda8-5d73-41a5-b362-8a4c96daa727",
 
   // "consumers" = само лични Microsoft акаунти (Outlook, Hotmail, Live).
   // Ако при регистрацията изберете и служебни акаунти, сменете с "common".
