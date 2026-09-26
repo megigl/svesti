@@ -1,0 +1,17 @@
+{
+  "name": "Made for Home – свещи",
+  "short_name": "Made for Home",
+  "description": "Рецепти, калкулатор и календар за съдържание",
+  "lang": "bg",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4EFE8",
+  "theme_color": "#F4EFE8",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
