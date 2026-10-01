@@ -1,10 +1,10 @@
 // Service worker: приложението работи без интернет.
 // При промяна на файловете увеличете VERSION, за да се обнови кешът по-бързо.
-const VERSION = "v2";
+const VERSION = "v5";
 const CACHE = "svesti-" + VERSION;
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./db.js", "./calc.js", "./image.js", "./sync.js", "./config.js",
-  "./ui.js", "./recipes.js", "./calc-ui.js", "./calendar.js", "./cal-ui.js",
+  "./ui.js", "./recipes.js", "./calc-ui.js", "./calendar.js", "./cal-ui.js", "./finance.js", "./fin-ui.js", "./arrangements.js", "./cost-ui.js",
   "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./icons/apple-touch-icon.png",
 ];
 const RUNTIME_HOSTS = ["cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"];

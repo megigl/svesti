@@ -6,8 +6,10 @@ import { $, $$, esc, view, toast, go, releaseURLs, download, applySeason, SEASON
 import * as sync from "./sync.js";
 import { renderList, renderDetail, renderEdit, liveCandles, CSV_COLUMNS } from "./recipes.js";
 import { renderCalc } from "./calc-ui.js";
-import { renderMonth, renderWeek, renderPost, renderPostEdit, renderTaskEdit, bindImport } from "./cal-ui.js";
+import { renderMonth, renderWeek, renderPost, renderPostEdit, renderTaskEdit, bindImport, renderFeed, renderStories, renderStory } from "./cal-ui.js";
 import { purgePublishedPhotos } from "./calendar.js";
+import { renderArrList, renderArrDetail, renderArrEdit } from "./arrangements.js";
+import { renderFinMonth, renderSales, renderSaleEdit, renderCosts, renderExpEdit, renderOrder, renderStock, renderMatEdit } from "./fin-ui.js";
 
 // ---------- Навигация ----------
 window.addEventListener("hashchange", onHistoryChange);
@@ -31,18 +33,36 @@ async function render() {
   releaseURLs();
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   const [a, b, c] = parts;
-  const tab = a === "cal" ? "cal" : a === "calc" ? "calc" : a === "settings" ? "settings" : "list";
+  const tab = a === "cal" ? "cal" : a === "calc" ? "calc" : a === "settings" ? "settings" : a === "fin" ? "fin" : "list";
   $$(".tabs a").forEach(x => x.classList.toggle("active", x.dataset.tab === tab));
-  document.body.dataset.view = a || "list";
+  document.body.dataset.view = a === "arr-card" ? "card" : a || "list";
   window.scrollTo(0, 0);
   if (a === "card") return renderDetail(b);
   if (a === "edit") return renderEdit(b);
   if (a === "new") return renderEdit(null);
+  if (a === "arr") return renderArrList();
+  if (a === "arr-card") return renderArrDetail(b);
+  if (a === "arr-edit") return renderArrEdit(b);
+  if (a === "arr-new") return renderArrEdit(null);
+  if (a === "fin") {
+    if (b === "m") return renderFinMonth(c);
+    if (b === "sales") return renderSales();
+    if (b === "sale") return renderSaleEdit(c === "new" ? null : c);
+    if (b === "costs") return renderCosts();
+    if (b === "exp") return renderExpEdit(c === "new" ? null : c);
+    if (b === "order") return renderOrder(c);
+    if (b === "stock") return renderStock();
+    if (b === "mat") return renderMatEdit(c === "new" ? null : c);
+    return renderFinMonth();
+  }
   if (a === "calc") return renderCalc();
   if (a === "settings") return renderSettings();
   if (a === "cal") {
     if (b === "m") return renderMonth(c);
     if (b === "week") return renderWeek(c);
+    if (b === "feed") return renderFeed();
+    if (b === "stories") return renderStories();
+    if (b === "story") return renderStory(c);
     if (b === "post" && parts[3] === "edit") return renderPostEdit(c);
     if (b === "post") return renderPost(c);
     if (b === "new-post") return renderPostEdit(null);
@@ -80,18 +100,20 @@ async function renderSettings() {
                     <button class="btn outline" id="logout">Изход</button>`
                  : `<button class="btn primary" id="login">Вход с Microsoft</button>`}
         </div>
-        <p class="hint">Приложението вижда само своята папка в OneDrive. Там са <code>data.json</code> (рецептите), <code>calendar.json</code> (календарът) и папка <code>photos</code>.</p>`}
+        <p class="hint">Приложението вижда само своята папка в OneDrive. Там са <code>data.json</code> (рецептите и аранжировките), <code>calendar.json</code> (календарът), <code>finance.json</code> (финансите) и папка <code>photos</code>.</p>`}
     </section>
     <section class="set">
       <h2>Календар</h2>
       <p class="muted">${imp ? `Последен импорт: ${esc(imp.fileName)}, ${new Date(imp.importedAt).toLocaleString("bg-BG")}.` : "Още няма импортиран календар."} Постове в календара: ${cal}.</p>
       <div class="row-actions"><label class="btn primary">Импорт на календар<input type="file" accept="application/json,.json" data-import hidden></label></div>
       <div class="grid2">${fieldNum("graceDays", "Снимките се трият след", settings.graceDays, "дни")}</div>
-      <p class="hint">Броят се от датата на поста, след като е отметнат като публикуван. Текстът на поста остава.</p>
+      <p class="hint">При постовете се броят от датата на поста, след като е отметнат като публикуван; текстът остава. При сторитата се броят от последната дата на правилото.</p>
     </section>
     <section class="set">
       <h2>Изчисления</h2>
       <div class="grid2">${fieldNum("maxAroma", "Максимум аромат", settings.maxAroma, "% от восъка")}${fieldNum("maxDye", "Максимум боя", settings.maxDye, "% от восъка")}</div>
+      <div class="grid2">${fieldNum("priceMultiplier", "Цена = материали ×", settings.priceMultiplier, "пъти")}</div>
+      <p class="hint">Предложената цена в рецептите и аранжировките. Вие я закръгляте в полето „Вашата цена“.</p>
       <div class="field wide"><span class="lbl">Процентът аромат в рецептите е от</span>
         <div class="seg" role="radiogroup">
           <label class="${settings.aromaMethod === "total" ? "on" : ""}"><input type="radio" name="aromaMethod" value="total" ${settings.aromaMethod === "total" ? "checked" : ""}>теглото на свещта</label>
@@ -107,7 +129,7 @@ async function renderSettings() {
     </section>
     <section class="set">
       <h2>Архив на файл</h2>
-      <p class="muted">Резервно копие без OneDrive: рецептите, календарът и снимките в един файл.</p>
+      <p class="muted">Резервно копие без OneDrive: рецептите, аранжировките, календарът, финансите и снимките в един файл.</p>
       <div class="row-actions">
         <button class="btn outline" id="expJson">Експорт на архив</button>
         <button class="btn outline" id="expCsv">Рецептите за Excel</button>
@@ -130,7 +152,7 @@ async function renderSettings() {
   on("expCsv", exportCsv);
   $("#impJson").addEventListener("change", importArchive);
   bindImport(view());
-  for (const k of ["graceDays", "maxAroma", "maxDye"]) {
+  for (const k of ["graceDays", "maxAroma", "maxDye", "priceMultiplier"]) {
     view().querySelector(`[name=${k}]`).addEventListener("change", async e => {
       const v = num(e.target.value);
       if (v === null || v < 0) { toast("Въведете число."); return; }
@@ -149,9 +171,10 @@ async function exportJson() {
   toast("Подготовка на архива…", 10000);
   const candles = await db.getAll("candles");
   const cal = await db.getAll("cal");
+  const fin = await db.getAll("fin");
   const photos = [];
   for (const p of await db.getAll("photos")) photos.push({ id: p.id, data: await blobToDataURL(p.blob) });
-  download(new Blob([JSON.stringify({ app: "svesti", version: 2, exportedAt: new Date().toISOString(), candles, cal, photos })], { type: "application/json" }), `svesti-arhiv-${stamp()}.json`);
+  download(new Blob([JSON.stringify({ app: "svesti", version: 3, exportedAt: new Date().toISOString(), candles, cal, fin, photos })], { type: "application/json" }), `svesti-arhiv-${stamp()}.json`);
   toast("Архивът е свален в „Изтегляния“");
 }
 async function exportCsv() {
@@ -167,10 +190,11 @@ async function importArchive(e) {
   try {
     const data = JSON.parse(await file.text());
     if (data.app === "made-for-home-calendar") throw new Error("Това е файл на календар. Използвайте „Импорт на календар“.");
+    if (data.app === "made-for-home-orders") throw new Error("Това е файл с поръчки. Използвайте „Импорт на поръчка“ във Финанси.");
     if (!Array.isArray(data.candles)) throw new Error("Файлът не е архив от това приложение.");
     const photoMap = new Map((data.photos || []).map(p => [p.id, p.data]));
     let n = 0;
-    for (const [store, list] of [["candles", data.candles], ["cal", data.cal || []]]) {
+    for (const [store, list] of [["candles", data.candles], ["cal", data.cal || []], ["fin", data.fin || []]]) {
       const { changedLocal } = mergeRecords(await db.getAll(store), list);
       for (const { incoming } of changedLocal) {
         await db.put(store, incoming); n++;
@@ -195,7 +219,7 @@ function paintSync(st) {
   el.title = st.message || "";
   $("#syncLabel").textContent = st.busy ? "Синхронизиране…" : cls === "ok" ? "Синхронизирано" : cls === "err" ? "Нужен е вход" : "Само на телефона";
   if (location.hash.startsWith("#/settings") && !st.busy) renderSettings();
-  if (st.changed && !st.busy) { st.changed = false; if (!/^#\/(edit|new|cal\/(post\/.+\/edit|new-|task))/.test(location.hash) && !location.hash.startsWith("#/settings")) render(); }
+  if (st.changed && !st.busy) { st.changed = false; if (!/^#\/(edit|new|arr-edit|arr-new|fin\/(sale|exp|mat)\/|cal\/(post\/.+\/edit|new-|task))/.test(location.hash) && !location.hash.startsWith("#/settings")) render(); }
 }
 sync.onSyncChange(paintSync);
 

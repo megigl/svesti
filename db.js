@@ -1,6 +1,6 @@
-// Локално хранилище в IndexedDB: рецепти, календар, снимки и настройки.
+// Локално хранилище в IndexedDB: рецепти и аранжировки, календар, финанси, снимки и настройки.
 const DB_NAME = "svesti-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise;
 
 function openDB() {
@@ -9,7 +9,7 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      for (const [name, key] of [["candles", "id"], ["photos", "id"], ["meta", "key"], ["cal", "id"]]) {
+      for (const [name, key] of [["candles", "id"], ["photos", "id"], ["meta", "key"], ["cal", "id"], ["fin", "id"]]) {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: key });
       }
     };
@@ -93,6 +93,7 @@ export const DEFAULT_SETTINGS = {
   maxAroma: 10,         // % от восъка
   maxDye: 0.4,          // % от восъка
   graceDays: 7,         // дни след публикуване, след които снимките на поста се трият
+  priceMultiplier: 2,   // предложена цена = материали × коефициент
 };
 export async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...(await db.meta("settings", {})) };

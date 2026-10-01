@@ -4,7 +4,7 @@ import { db, mergeRecords, photosOf } from "./db.js";
 import { makeThumb } from "./image.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0/me/drive/special/approot";
-const COLLECTIONS = [{ store: "candles", file: "data.json" }, { store: "cal", file: "calendar.json" }];
+const COLLECTIONS = [{ store: "candles", file: "data.json" }, { store: "cal", file: "calendar.json" }, { store: "fin", file: "finance.json" }];
 const PHOTO_DIR = "photos";
 
 // MSAL се зарежда първо от папка lib/ (ако сте я качили), иначе от jsDelivr.

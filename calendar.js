@@ -163,6 +163,12 @@ export async function toggleMark(markId, done) {
 }
 export async function saveCal(rec) { rec.updatedAt = Date.now(); await db.put("cal", rec); }
 
+// Последният ден, в който важи правилото за стори.
+export function storyEnd(src) {
+  const last = (src.dates || []).filter(Boolean).sort().pop() || null;
+  if (src.to && last) return src.to < last ? src.to : last;
+  return src.to || last;
+}
 // Снимките на публикувани постове се трият N дни след датата; текстът остава.
 export async function purgePublishedPhotos() {
   const { graceDays } = await getSettings();
@@ -173,5 +179,12 @@ export async function purgePublishedPhotos() {
     p.local = { ...p.local, photos: [], photosPurged: true };
     await saveCal(p);
   }
-  return posts.length;
+  // Сторита: примерните снимки се трият N дни след последния ден на правилото.
+  const stories = (await db.getAll("cal")).filter(r => r.kind === "story" && !r.deleted && r.local && (r.local.photos || []).length && storyEnd(r.src) && storyEnd(r.src) < limit);
+  for (const r of stories) {
+    for (const pid of r.local.photos) await db.del("photos", pid);
+    r.local = { ...r.local, photos: [], photosPurged: true };
+    await saveCal(r);
+  }
+  return posts.length + stories.length;
 }

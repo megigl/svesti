@@ -7,12 +7,12 @@ import { $, $$, esc, uid, view, objURL, toast, go, openPhoto, field, icons } fro
 import * as sync from "./sync.js";
 import { liveCandles } from "./recipes.js";
 import {
-  loadCalendar, dayItems, phaseOn, nextDeadline, upcomingTasks, toggleMark, saveCal, previewImport, applyImport, purgePublishedPhotos,
+  loadCalendar, dayItems, phaseOn, storiesOn, storyEnd, nextDeadline, upcomingTasks, toggleMark, saveCal, previewImport, applyImport, purgePublishedPhotos,
   iso, parseISO, today, addDays, mondayOf, daysBetween, dm, weekdayName, MONTHS, FORMATS, TASK_TYPES, defaultLocal, countKinds,
 } from "./calendar.js";
 
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
-const seg = active => `<nav class="seg" aria-label="Изглед"><a href="#/cal" class="${active === "m" ? "on" : ""}">Месец</a><a href="#/cal/week/${mondayOf(today())}" class="${active === "w" ? "on" : ""}">Седмица</a></nav>`;
+const seg = active => `<nav class="seg" aria-label="Изглед"><a href="#/cal" class="${active === "m" ? "on" : ""}">Месец</a><a href="#/cal/week/${mondayOf(today())}" class="${active === "w" ? "on" : ""}">Седмица</a><a href="#/cal/feed" class="${active === "f" ? "on" : ""}">Фийд</a><a href="#/cal/stories" class="${active === "s" ? "on" : ""}">Сторита</a></nav>`;
 const taskIcon = t => icons[{ "изработка": "make", "снимки": "photo", "текстове": "text" }[t] || "other"];
 const changed = () => sync.scheduleSync();
 
@@ -131,7 +131,7 @@ export async function renderWeek(monday) {
       ${p.src.cta ? `<span class="muted">${esc(p.src.cta)}</span>` : ""}
       <span class="tags">${p.src.keyword ? `<b class="kw">${esc(p.src.keyword)}</b>` : ""}${p.src.batch ? `<b class="tag">${esc(p.src.batch)}</b>` : ""}</span></span></a>`);
     it.tasks.forEach(t => parts.push(taskRow(t, cal.posts)));
-    it.stories.forEach(s => parts.push(`<label class="story"><input type="checkbox" data-mark="${esc(s.markId)}" ${s.done ? "checked" : ""}><span><span class="muted">Стори: </span>${esc(s.rule.src.story)}${s.rule.src.sticker ? `<span class="muted">, ${esc(s.rule.src.sticker)}</span>` : ""}</span></label>`));
+    it.stories.forEach(s => parts.push(`<div class="story-line"><label class="story"><input type="checkbox" data-mark="${esc(s.markId)}" ${s.done ? "checked" : ""}><span><span class="muted">Стори: </span>${esc(s.rule.src.story)}${s.rule.src.sticker ? `<span class="muted">, ${esc(s.rule.src.sticker)}</span>` : ""}</span></label><a class="story-go" href="#/cal/story/${esc(s.rule.id)}" aria-label="Примерни снимки за сторито">${icons.chevron}</a></div>`));
     sections.push(`<section class="day-sec${d === today() ? " is-today" : ""}" id="d-${d}"><h3>${cap(weekdayName(d))}<span class="muted">${dm(d)}</span></h3>${parts.join("") || `<p class="muted">Свободен ден</p>`}</section>`);
   }
   view().innerHTML = `
@@ -358,4 +358,124 @@ export async function importCalendarFile(file) {
   changed();
   toast(`Календарът е импортиран: ${describe(pv.incoming)}`, 4000);
   window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+
+// ---------- Фийд: предстоящите постове като решетка от снимки ----------
+const feedState = { order: "dates", past: false };
+const FORMAT_ICON = {
+  "Reel": `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>`,
+  "Карусел": `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg>`,
+};
+export async function renderFeed() {
+  const cal = await loadCalendar();
+  const t = today();
+  const from = feedState.past ? addDays(t, -30) : t;
+  let posts = cal.posts.filter(p => p.src.date >= from).sort((a, b) => (a.src.date + (a.src.time || "")).localeCompare(b.src.date + (b.src.time || "")));
+  const noPhoto = posts.filter(p => !(p.local.photos || []).length && p.src.date >= t).length;
+  if (feedState.order === "profile") posts = [...posts].reverse();
+  view().innerHTML = `
+    <header class="page-head">
+      <div class="title-row"><h1>Календар</h1><span class="muted">${posts.length ? `${noPhoto ? `${noPhoto} без снимка` : "всички със снимка"}` : ""}</span></div>
+      ${seg("f")}
+      <div class="feed-opts">
+        <div class="chips"><button type="button" class="chip${feedState.order === "dates" ? " on" : ""}" data-order="dates">По дати</button><button type="button" class="chip${feedState.order === "profile" ? " on" : ""}" data-order="profile">Като в профила</button></div>
+        <label class="check-line small"><input type="checkbox" id="feedPast" ${feedState.past ? "checked" : ""}>и последните 30 дни</label>
+      </div>
+    </header>
+    ${posts.length ? `<ul class="feed">${posts.map(p => {
+      const n = (p.local.photos || []).length;
+      const past = p.src.date < t;
+      return `<li><a href="#/cal/post/${esc(p.id)}" class="ft${n ? "" : " empty"}${past ? " past" : ""}" data-feed="${esc(p.id)}" aria-label="${dm(p.src.date)}: ${esc(p.src.title || "пост")}">
+        <span class="ft-txt">${esc((p.src.title || "Пост").slice(0, 60))}</span>
+        <span class="ft-date">${dm(p.src.date)}${p.src.date === t ? ", днес" : ""}</span>
+        ${FORMAT_ICON[p.src.format] || (n > 1 ? FORMAT_ICON["Карусел"] : "") ? `<span class="ft-fmt">${FORMAT_ICON[p.src.format] || FORMAT_ICON["Карусел"]}</span>` : ""}
+        ${p.local.published ? `<span class="ft-ok">✓</span>` : ""}
+      </a></li>`;
+    }).join("")}</ul>` : `<div class="empty"><p>Няма предстоящи постове. Импортирайте календар или добавете пост.</p><a class="btn outline" href="#/cal/new-post">Нов пост</a></div>`}`;
+  $$("[data-order]").forEach(b => b.addEventListener("click", () => { feedState.order = b.dataset.order; renderFeed(); }));
+  $("#feedPast").addEventListener("change", e => { feedState.past = e.target.checked; renderFeed(); });
+  $$("[data-feed]").forEach(async el => {
+    const p = posts.find(x => x.id === el.dataset.feed);
+    const ph = await firstPhoto(p);
+    if (ph) { el.style.backgroundImage = `url(${objURL(ph.thumb || ph.blob)})`; el.classList.add("has"); }
+  });
+}
+
+// ---------- Сторита: какво предстои през следващите две седмици ----------
+export async function renderStories() {
+  const cal = await loadCalendar();
+  const t = today();
+  const days = [...Array(14)].map((_, i) => addDays(t, i)).map(d => ({ d, list: storiesOn(cal, d) })).filter(x => x.list.length);
+  const rules = cal.stories;
+  const noPhoto = rules.filter(r => !((r.local && r.local.photos) || []).length).length;
+  view().innerHTML = `
+    <header class="page-head">
+      <div class="title-row"><h1>Календар</h1><span class="muted">${rules.length ? (noPhoto ? `${noPhoto} без пример` : "всички с пример") : ""}</span></div>
+      ${seg("s")}
+    </header>
+    ${days.length ? days.map(({ d, list }) => `<section class="st-day${d === t ? " is-today" : ""}">
+      <h3>${d === t ? "Днес" : d === addDays(t, 1) ? "Утре" : cap(weekdayName(d))}<span class="muted">${dm(d)}</span></h3>
+      <ul class="st-row">${list.map(s => `<li><a href="#/cal/story/${esc(s.rule.id)}" class="st${s.done ? " done" : ""}" data-story="${esc(s.rule.id)}">
+        <span class="st-txt">${esc(s.rule.src.story || "Стори")}</span>
+        ${s.rule.src.sticker ? `<span class="st-stk">${esc(s.rule.src.sticker)}</span>` : ""}
+        ${s.done ? `<span class="st-ok">✓</span>` : ""}</a><span class="st-cap">${esc(s.rule.src.story || "")}</span></li>`).join("")}</ul>
+    </section>`).join("") : `<div class="empty"><p>Няма сторита през следващите две седмици.</p></div>`}
+    ${rules.length ? `<section class="set"><h2>Всички правила за сторита</h2><ul class="link-list">${rules.map(r => `<li><a href="#/cal/story/${esc(r.id)}"><span>${((r.local && r.local.photos) || []).length ? `${r.local.photos.length} сн.` : "няма"}</span>${esc(r.src.story || r.id)}</a></li>`).join("")}</ul></section>` : ""}`;
+  const photoOf = new Map();
+  for (const r of rules) { const pid = ((r.local && r.local.photos) || [])[0]; if (pid) photoOf.set(r.id, db.get("photos", pid)); }
+  $$("[data-story]").forEach(async el => {
+    const pr = photoOf.get(el.dataset.story); const ph = pr && await pr;
+    if (ph) { el.style.backgroundImage = `url(${objURL(ph.thumb || ph.blob)})`; el.classList.add("has"); }
+  });
+}
+
+// ---------- Правило за стори: примерни снимки ----------
+export async function renderStory(id) {
+  const r = await db.get("cal", id);
+  if (!r || r.deleted || r.kind !== "story") { view().innerHTML = `<div class="empty"><p>Сторито не е намерено.</p><a class="btn" href="#/cal/stories">Към сторитата</a></div>`; return; }
+  const cal = await loadCalendar();
+  const settings = await getSettings();
+  r.local = { photos: [], ...(r.local || {}) };
+  const s = r.src, L = r.local;
+  const photos = (await Promise.all(L.photos.map(pid => db.get("photos", pid)))).filter(Boolean);
+  const t = today();
+  const next = [...Array(60)].map((_, i) => addDays(t, i)).filter(d => storiesOn(cal, d).some(x => x.rule.id === r.id)).slice(0, 8);
+  const when = s.dates && s.dates.length ? `На ${s.dates.map(dm).join(", ")}` : (s.weekdays || []).length ? `Всеки ${s.weekdays.join(", ")}` : "";
+  view().innerHTML = `
+    <header class="page-head post-head">
+      <a class="text-link" href="#/cal/stories">‹ Сторита</a>
+      <p class="muted">${esc(when)}${s.from || s.to ? `, ${s.from ? dm(s.from) : ""} – ${s.to ? dm(s.to) : ""}` : ""}</p>
+      <h1>${esc(s.story || "Стори")}</h1>
+    </header>
+    <section class="post-photos">
+      <span class="muted">Примерни снимки</span>
+      <div class="thumb-row">${photos.map(ph => `<div class="thumb big st-thumb"><button type="button" class="open" data-open="${esc(ph.id)}" aria-label="Отвори снимката"><img alt="" src="${objURL(ph.thumb || ph.blob)}"></button><button type="button" class="x" data-rm="${esc(ph.id)}" aria-label="Премахни снимката">×</button></div>`).join("")}
+        <label class="thumb big st-thumb add">${icons.plus}<span>Снимка</span><input type="file" accept="image/*" multiple hidden id="addPhoto"></label></div>
+      <p class="hint">Снимките се показват при всяко стори от това правило${storyEnd(s) ? ` и се изтриват ${settings.graceDays} ${settings.graceDays == 1 ? "ден" : "дни"} след последната му дата (${dm(storyEnd(s))})` : ""}.</p>
+      ${L.photosPurged && !photos.length ? `<p class="muted">Снимките са изтрити, след като правилото е приключило.</p>` : ""}
+    </section>
+    <section class="kvs">
+      ${s.sticker ? `<div class="kv"><span class="muted">Стикер</span><span>${esc(s.sticker)}</span></div>` : ""}
+      ${s.example ? `<div class="kv"><span class="muted">Пример</span><span>${esc(s.example)}</span></div>` : ""}
+      ${next.length ? `<div class="kv"><span class="muted">Следващи дати</span><div class="linked">${next.map(d => `<a class="chip" href="#/cal/week/${mondayOf(d)}">${weekdayName(d).slice(0, 3)}, ${dm(d)}</a>`).join("")}</div></div>` : ""}
+    </section>`;
+  const save = async () => { await saveCal(r); changed(); };
+  $$("[data-open]").forEach(b => b.addEventListener("click", () => openPhoto(photos.find(x => x.id === b.dataset.open).blob)));
+  $$("[data-rm]").forEach(b => b.addEventListener("click", async () => {
+    L.photos = L.photos.filter(x => x !== b.dataset.rm); await db.del("photos", b.dataset.rm); await save(); renderStory(id);
+  }));
+  $("#addPhoto").addEventListener("change", async e => {
+    const files = [...e.target.files]; e.target.value = "";
+    for (const f of files) {
+      try {
+        toast("Обработка на снимката…", 10000);
+        const { blob, thumb } = await compressPhoto(f, CONFIG);
+        const pid = uid();
+        await db.put("photos", { id: pid, blob, thumb, uploaded: false, createdAt: Date.now() });
+        L.photos = [...L.photos, pid]; L.photosPurged = false;
+      } catch (err) { toast(err.message || "Снимката не може да се прочете."); }
+    }
+    await save(); toast("Снимката е добавена"); renderStory(id);
+  });
 }

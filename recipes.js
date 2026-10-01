@@ -6,10 +6,14 @@ import { compressPhoto } from "./image.js";
 import { $, $$, esc, uid, view, objURL, toast, go, openPhoto, field, icons } from "./ui.js";
 import * as sync from "./sync.js";
 import { loadCalendar, dm } from "./calendar.js";
+import { loadFin, matMap, candleCost, unitCostOf, multiplier } from "./finance.js";
+import { matSelect, extraRow, extrasRows, readExtras, breakdown, priceCard, addRowBtn, eur } from "./cost-ui.js";
 
+// Свещите (без аранжировките, които са в същото хранилище с kind: "arrangement").
 export async function liveCandles() {
-  return (await db.getAll("candles")).filter(c => !c.deleted).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return (await db.getAll("candles")).filter(c => !c.deleted && c.kind !== "arrangement").sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
+export const kindSeg = active => `<nav class="seg" aria-label="Вид"><a href="#/" class="${active === "c" ? "on" : ""}">Свещи</a><a href="#/arr" class="${active === "a" ? "on" : ""}">Аранжировки</a></nav>`;
 async function saveCandle(c) { c.updatedAt = Date.now(); await db.put("candles", c); sync.scheduleSync(); }
 
 // ---------- Списък ----------
@@ -17,12 +21,14 @@ const listState = { q: "", col: "" };
 export async function renderList() {
   const items = await liveCandles();
   const q = listState.q.toLowerCase();
-  const filtered = items.filter(c => (!listState.col || c.collection === listState.col) &&
+  const onlyArr = listState.col === "__arr";
+  const filtered = items.filter(c => (onlyArr ? c.arrangementOnly : !c.arrangementOnly && (!listState.col || c.collection === listState.col)) &&
     (!q || [c.name, c.fragrance, c.batch, c.waxType, c.dyeName, c.supplier, c.collection].join(" ").toLowerCase().includes(q)));
-  const chips = ["", ...COLLECTIONS].map(c => `<button type="button" class="chip${listState.col === c ? " on" : ""}" data-col="${esc(c)}">${c || "Всички"}</button>`).join("");
+  const chips = ["", ...COLLECTIONS, ...(items.some(c => c.arrangementOnly) ? ["__arr"] : [])].map(c => `<button type="button" class="chip${listState.col === c ? " on" : ""}" data-col="${esc(c)}">${c === "__arr" ? "За аранжировки" : c || "Всички"}</button>`).join("");
   view().innerHTML = `
     <header class="page-head">
       <div class="title-row"><h1>Рецепти</h1><span class="muted">${items.length ? `${items.length} ${items.length === 1 ? "свещ" : "свещи"}` : ""}</span></div>
+      ${kindSeg("c")}
       ${items.length ? `<label class="search">${icons.search}<input id="search" type="search" aria-label="Търсене" placeholder="Търсене по име или аромат" value="${esc(listState.q)}"></label>
       <div class="chips" role="group" aria-label="Колекции">${chips}</div>` : ""}
     </header>
@@ -53,7 +59,11 @@ export async function renderDetail(id) {
   const v = x => x !== undefined && x !== null && x !== "";
   const row = (label, val, unit = "") => v(val) ? `<div class="row"><dt>${label}</dt><dd>${typeof val === "number" ? fmt(val, 2) : esc(val)}${unit ? ` ${unit}` : ""}</dd></div>` : "";
   const section = (title, preview, rows) => rows.trim() ? `<details class="fold"><summary><span><strong>${title}</strong><small>${esc(preview)}</small></span>${icons.chevron}</summary><dl>${rows}</dl></details>` : "";
-  const margin = num(c.price) !== null && num(c.cost) !== null ? num(c.price) - num(c.cost) : null;
+  const fin = await loadFin();
+  const mats = matMap(fin.materials);
+  const mult = await multiplier();
+  const uc = unitCostOf(c, mats);
+  const margin = num(c.price) !== null && uc.value !== null ? num(c.price) - uc.value : null;
   const keys = [
     ["Восък", v(c.waxG) ? `${fmt(c.waxG, 0)} g` : "–", c.waxType || ""],
     ["Аромат", v(c.fragranceLoad) ? `${fmt(c.fragranceLoad, 1)}%` : "–", [v(c.fragranceG) && `${fmt(c.fragranceG, 1)} g`, c.fragrance].filter(Boolean).join(" ")],
@@ -71,6 +81,7 @@ export async function renderDetail(id) {
       <h1>${esc(c.name || "Без име")}</h1>
       <p class="muted">${[c.batch && `Партида ${esc(c.batch)}`, c.date && new Date(c.date).toLocaleDateString("bg-BG")].filter(Boolean).join(", ")}</p>
       <div class="keys">${keys.map(([k, val, s]) => `<div><span class="k">${k}</span><span class="v">${esc(val)}</span><span class="s">${esc(s)}</span></div>`).join("")}</div>
+      ${priceCard({ cost: uc.value, source: uc.source, estimated: uc.detail?.estimated, missing: uc.detail?.missing, mult, price: c.price })}
       <div class="folds">
         ${section("Свещ и съд", [v(c.totalG) && `${fmt(c.totalG, 0)} g само восък`, c.container].filter(Boolean).join(", "),
           row("Свещ само восък", c.totalG, "g") + row("Вид съд", c.container) + row("Обем", c.volumeMl, "мл") + row("Диаметър", c.diameterCm, "см"))}
@@ -80,8 +91,9 @@ export async function renderDetail(id) {
           row("Добавяне на аромата", c.tempAdd, "°C") + row("Изливане", c.tempPour, "°C") + row("Зреене", c.cureDays, "дни"))}
         ${section("Тест за горене", c.burnNotes ? c.burnNotes.slice(0, 40) + (c.burnNotes.length > 40 ? "…" : "") : "",
           row("Време на горене", c.burnHours, "ч") + (c.burnNotes ? `<div class="row wide"><dt>Бележки</dt><dd>${esc(c.burnNotes)}</dd></div>` : ""))}
-        ${section("Цена и доставчик", [v(c.cost) && `себестойност ${fmt(c.cost, 2)} €`].filter(Boolean).join(""),
-          row("Себестойност", c.cost, "€") + row("Продажна цена", c.price, "€") + (margin !== null ? row("Печалба на брой", margin, "€") : "") + row("Доставчик", c.supplier))}
+        ${uc.detail ? `<details class="fold"><summary><span><strong>Себестойност по материали</strong><small>${esc(eur(uc.detail.total))}${uc.detail.missing ? ", непълна" : ""}</small></span>${icons.chevron}</summary>${breakdown(uc.detail)}</details>` : ""}
+        ${section("Цена и доставчик", [margin !== null && `печалба ${fmt(margin, 2)} € на брой`].filter(Boolean).join(""),
+          (uc.source === "manual" ? row("Себестойност (ръчно)", c.cost, "€") : "") + row("Продажна цена", c.price, "€") + (margin !== null ? row("Печалба на брой", margin, "€") : "") + row("Доставчик", c.supplier))}
         ${section("Бележки", c.notes ? c.notes.slice(0, 40) + (c.notes.length > 40 ? "…" : "") : "", c.notes ? `<div class="row wide"><dt>Бележки</dt><dd>${esc(c.notes)}</dd></div>` : "")}
       </div>
       ${linked.length ? `<h2 class="sub-h">В календара</h2><ul class="link-list">${linked.map(p => `<li><a href="#/cal/post/${esc(p.id)}"><span>${dm(p.src.date)}</span>${esc(p.src.title)}</a></li>`).join("")}</ul>` : ""}
@@ -112,6 +124,9 @@ export async function renderEdit(id) {
   const settings = await getSettings();
   const existing = id ? await db.get("candles", id) : null;
   const draft = existing ? { ...existing } : { id: uid(), createdAt: Date.now(), photos: [], date: new Date().toISOString().slice(0, 10), wickCount: 1, dyePercent: settings.maxDye, ...(prefill.value || {}) };
+  const fin = await loadFin();
+  const mats = matMap(fin.materials);
+  const mult = await multiplier();
   prefill.value = null;
   let photoIds = [...(draft.photos || [])];
   const newPhotos = new Map();
@@ -132,7 +147,8 @@ export async function renderEdit(id) {
     <form id="form" class="stack-form" autocomplete="off" novalidate>
       <section id="ch-osnovni" class="chapter"><div class="chapter-head"><span class="num">1</span><h2>Основни</h2><i></i></div>
         ${group("Снимки", `<div class="thumb-row" id="gallery"></div><label class="btn photo-btn">${icons.plus}Добави снимка<input id="photoInput" type="file" accept="image/*" multiple hidden></label>`)}
-        ${group("Основни", f("name", "Име на свещта", { wide: true }) + grid(f("batch", "Партида"), f("date", "Дата", { type: "date" })) + f("collection", "Колекция", { options: COLLECTIONS, wide: true }))}
+        ${group("Основни", f("name", "Име на свещта", { wide: true }) + grid(f("batch", "Партида"), f("date", "Дата", { type: "date" })) + f("collection", "Колекция", { options: COLLECTIONS, wide: true }) +
+          `<label class="check-line"><input type="checkbox" name="_arrOnly" ${draft.arrangementOnly ? "checked" : ""}>Само за аранжировки (скрита от основния списък)</label>`)}
         ${group("Съд", f("container", "Вид съд", { wide: true, ph: "напр. стъклен буркан" }) + grid(f("volumeMl", "Обем", { type: "number", unit: "мл" }), f("diameterCm", "Диаметър", { type: "number", unit: "см" })))}
       </section>
       <section id="ch-recepta" class="chapter"><div class="chapter-head"><span class="num">2</span><h2>Рецепта</h2><i></i></div>
@@ -153,7 +169,15 @@ export async function renderEdit(id) {
         ${group("Горене", grid(f("burnHours", "Време на горене", { type: "number", unit: "ч" })) + f("burnNotes", "Бележки от теста", { type: "textarea", ph: "разтопен басейн, пламък, тунелиране…" }))}
       </section>
       <section id="ch-cena" class="chapter"><div class="chapter-head"><span class="num">4</span><h2>Цена и бележки</h2><i></i></div>
-        ${group("Цена и доставчик", grid(f("cost", "Себестойност", { type: "number", unit: "€" }), f("price", "Продажна цена", { type: "number", unit: "€" })) + f("supplier", "Доставчик", { wide: true }))}
+        ${group("Материали", `<p class="hint">Изберете материалите от склада (таб Финанси). Грамовете восък, аромат и боя идват от рецептата.${mats.size ? "" : " Складът още е празен: импортирайте поръчка или добавете материал."}</p>` +
+          matSelect({ k: "matWax", label: "Восък", value: draft.matWax, mats, cats: ["Восък"], wide: true }) +
+          matSelect({ k: "matAroma", label: "Ароматно масло", value: draft.matAroma, mats, cats: ["Аромат"], wide: true }) +
+          matSelect({ k: "matDye", label: "Боя", value: draft.matDye, mats, cats: ["Боя"], wide: true }) +
+          grid(matSelect({ k: "matWick", label: "Фитил", value: draft.matWick, mats, cats: ["Фитил"] }), f("wickLenCm", "Дължина на фитил", { type: "number", unit: "см", ph: "ако е на метър" })) +
+          matSelect({ k: "matContainer", label: "Съд", value: draft.matContainer, mats, cats: ["Съд"], wide: true }) +
+          `<span class="lbl">Етикет, опаковка, декорация</span><div id="extras" class="extras">${extrasRows("_ex", draft.extras, mats)}</div>` + addRowBtn("addExtra", "Добави материал") +
+          `<div id="costOut"></div>`)}
+        ${group("Цена", grid(f("price", "Вашата цена", { type: "number", unit: "€" }), f("cost", "Себестойност ръчно", { type: "number", unit: "€", ph: "ако няма материали" })) + f("supplier", "Доставчик", { wide: true }))}
         ${group("Бележки", f("notes", "Свободни бележки", { type: "textarea", ph: "Идеи за следващата партида…" }))}
       </section>
       <button class="btn primary block" type="submit">Запази рецептата</button>
@@ -203,6 +227,23 @@ export async function renderEdit(id) {
   });
 
   // Изчисления
+  // Себестойност на живо
+  const costOut = $("#costOut");
+  const updateCost = () => {
+    const tmp = { waxG: F("waxG").value, fragranceG: F("fragranceG").value, dyeG: F("dyeG").value, wickCount: F("wickCount").value, wickLenCm: F("wickLenCm").value,
+      matWax: F("matWax").value, matAroma: F("matAroma").value, matDye: F("matDye").value, matWick: F("matWick").value, matContainer: F("matContainer").value, extras: readExtras(form, "_ex") };
+    const cc = candleCost(tmp, mats);
+    const manual = num(F("cost").value);
+    const cost = cc && cc.total > 0 ? cc.total : manual;
+    costOut.innerHTML = breakdown(cc) + priceCard({ cost, source: cc && cc.total > 0 ? "materials" : manual !== null ? "manual" : "none", estimated: cc?.estimated, missing: cc?.missing, mult, price: F("price").value });
+  };
+  let extraIdx = (draft.extras || []).length;
+  $("#addExtra").addEventListener("click", () => { $("#extras").insertAdjacentHTML("beforeend", extraRow("_ex", extraIdx++, {}, mats)); updateCost(); });
+  $("#extras").addEventListener("click", e => { const b = e.target.closest("[data-rm-row]"); if (b) { b.closest(".extra-row").remove(); updateCost(); } });
+  $("#extras").addEventListener("change", e => { const row = e.target.closest(".extra-row"); if (row && e.target.tagName === "SELECT") { const m = mats.get(e.target.value); row.querySelector("[data-unit]").textContent = m ? ({ g: "g", ml: "мл", "бр.": "бр.", "м": "м" }[m.unit] || "") : ""; } });
+  form.addEventListener("input", e => { if (/^(_ex_|price$|cost$|wickLenCm$|wickCount$)/.test(e.target.name || "")) updateCost(); });
+  form.addEventListener("change", e => { if (/^(mat|_ex_)/.test(e.target.name || "")) updateCost(); });
+
   const recalc = (force) => {
     const X = num(F("totalG").value), p = num(F("fragranceLoad").value);
     if (X !== null) {
@@ -219,6 +260,7 @@ export async function renderEdit(id) {
     F("dyeG").value = W !== null && d !== null ? Math.round(W * d / 100 * 100) / 100 : "";
     $("#dyeOut").innerHTML = W !== null && d !== null ? `${fmt(W, 1)} g восък × ${fmt(d, 2)}% = <strong>${fmt(W * d / 100, 2)} g боя</strong>${d > settings.maxDye + 1e-9 ? `<br><span class="warn">Над максимума от ${fmt(settings.maxDye, 2)}% от восъка.</span>` : Math.abs(d - settings.maxDye) < 1e-9 ? ". Това е максимумът: най-наситен цвят." : ""}` : "";
     $$(".dose .chip").forEach(b => b.classList.toggle("on", d !== null && Math.abs(+b.dataset.dose - d) < 1e-9));
+    updateCost();
   };
   ["totalG", "fragranceLoad", "dyePercent"].forEach(k => F(k).addEventListener("input", () => recalc(true)));
   $$(".dose .chip").forEach(b => b.addEventListener("click", () => { F("dyePercent").value = fmt(+b.dataset.dose, 3); recalc(true); }));
@@ -241,11 +283,14 @@ export async function renderEdit(id) {
     const data = { ...draft };
     for (const el of form.elements) {
       if (!el.name || el.name.startsWith("_")) continue;
-      const numeric = ["volumeMl", "diameterCm", "totalG", "waxG", "wickCount", "fragranceLoad", "fragranceG", "dyePercent", "dyeG", "tempAdd", "tempPour", "cureDays", "burnHours", "cost", "price"].includes(el.name);
+      const numeric = ["volumeMl", "diameterCm", "totalG", "waxG", "wickCount", "wickLenCm", "fragranceLoad", "fragranceG", "dyePercent", "dyeG", "tempAdd", "tempPour", "cureDays", "burnHours", "cost", "price"].includes(el.name);
       const raw = el.value.trim();
       const val = numeric ? num(raw) : raw;
       if (val === "" || val === null) delete data[el.name]; else data[el.name] = val;
     }
+    const extras = readExtras(form, "_ex");
+    if (extras.length) data.extras = extras; else delete data.extras;
+    if (F("_arrOnly").checked) data.arrangementOnly = true; else delete data.arrangementOnly;
     for (const [pid, p] of newPhotos) await db.put("photos", { id: pid, blob: p.blob, thumb: p.thumb, uploaded: false, createdAt: Date.now() });
     for (const pid of removed) await db.del("photos", pid);
     data.photos = photoIds;
