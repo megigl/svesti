@@ -1,6 +1,6 @@
 // Service worker: приложението работи без интернет.
 // При промяна на файловете увеличете VERSION, за да се обнови кешът по-бързо.
-const VERSION = "v5";
+const VERSION = "v6";
 const CACHE = "svesti-" + VERSION;
 const SHELL = [
   "./", "./index.html", "./styles.css", "./app.js", "./db.js", "./calc.js", "./image.js", "./sync.js", "./config.js",
@@ -31,12 +31,17 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // Файлове на приложението: веднага от кеша, обновяване във фон
+  // Файлове на приложението: първо от мрежата (винаги най-новата версия), без интернет от кеша.
+  // Така index.html, стиловете и кодът никога не се разминават след обновяване в GitHub.
   if (url.origin === location.origin) {
     e.respondWith(caches.open(CACHE).then(async cache => {
-      const cached = await cache.match(req, { ignoreSearch: true });
-      const network = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => cached);
-      return cached || network;
+      try {
+        const res = await fetch(req, { cache: "no-cache" });
+        if (res.ok) cache.put(req, res.clone());
+        return res;
+      } catch {
+        return (await cache.match(req, { ignoreSearch: true })) || Response.error();
+      }
     }));
     return;
   }
